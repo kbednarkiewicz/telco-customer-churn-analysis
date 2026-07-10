@@ -1,0 +1,1154 @@
+---
+title: "Analiza danych klientów Telco Customer Churn"
+author: |+
+    | Katarzyna Bednarkiewicz, Ewelina Dąbrowa 
+date: "2026-04-03"
+output:
+  pdf_document:
+    toc: yes
+    dev: cairo_pdf
+    fig_caption: yes
+    fig_width: 5
+    fig_height: 4
+    number_sections: yes
+header-includes:
+- \usepackage[OT4]{polski}
+- \usepackage[utf8]{inputenc}
+- \usepackage{graphicx}
+- \usepackage{float}
+fontsize: 12pt
+lang: pl
+
+---
+
+
+
+  
+\newcommand{\kb}[1]{\textcolor{blue}{#1}}
+    
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "", fig.align = "center")
+knitr::opts_chunk$set(dev.args = list(png = list(type = "cairo"))) 
+
+library(xtable) # do tworzenia tabel texowych w pdf
+library(e1071) # pakiet do m.in. wyznaczania skośności i kurtozy
+library(dplyr) # do wybrania podzbioru danych
+library(DataExplorer)
+  
+```
+\vspace{1cm}    
+\newpage
+    
+# Przygotowanie danych. Podstawowe informacje o danych.
+    
+Wczytujemy dane z pliku *WA_Fn-UseC_-Telco-Customer-Churn.csv*.
+    
+```{r wczytanie danych, echo=FALSE}
+# wczytanie danych z pliku csv
+dane <- read.csv(file="WA_Fn-UseC_-Telco-Customer-Churn.csv", 
+                 stringsAsFactors = TRUE)
+
+# dołączanie zmiennych
+attach(dane)
+```
+    
+Typy poszczególnych zmiennych można sprawdzić za pomocą funkcji \texttt{str()}.
+\vspace{0.5cm}
+
+
+**Rozmiar danych (liczba przypadków i cech)**
+      
+Liczba cech wynosi `r ncol(dane)` a liczba rekordów wynosi `r nrow(dane)`.
+    
+Poszczególne cechy to
+    
+    
+\begin{itemize}
+\item \textbf{gender} (factor; 2 poziomy: Female/Male) - płeć klienta
+\item \textbf{SeniorCitizen} (numeric; zakres: 0-1) - informacja czy klient jest emerytem
+\item \textbf{Partner} (factor; 2 poziomy: No/Yes) - informacja czy klient posiada partnera
+\item \textbf{Dependents} (factor; 2 poziomy: No/Yes) - informacja czy klient posiada kogoś na utrzymaniu
+\item \textbf{tenure} (numeric; zakres: 0-72) - liczba miesięcy przez ile klient pozostał w firmie
+\item \textbf{PhoneService} (factor; 2 poziomy: No/Yes) - informacja czy klient posiada usługę telefoniczną
+\item \textbf{MultipleLines} (factor; 3 poziomy: No/No phone service/Yes) - informacja czy klient posiada wiele linii
+\item \textbf{InternetService} (factor; 3 poziomy: DSL/Fiber optic/ No) - dostawca usług internetowych klienta
+\item \textbf{OnlineSecurity} (factor; 3 poziomy: No/No internet service/Yes) - informacja czy klient posiada ochronę w internecie
+\item \textbf{OnlineBackup} (factor; 3 poziomy: No/No intenet service/Yes) - informacja czy klient posiada zapasową kopię online
+\item \textbf{DeviceProtection} (factor; 3 poziomy: No/No internet service/Yes) - informacja czy klient posiada ochronę urządzenia
+\item \textbf{TechSupport} (factor; 3 poziomy: No/No internet service/Yes) -  informacja czy klient posiada serwis techniczny
+\item \textbf{StreamingTV} (factor; 3 poziomy: No/No internet service/Yes) - informacja czy klient posiada telewizję strumieniową
+\item \textbf{StreamingMovies} (factor; 3 poziomy: No/No internet service/Yes) - informacja czy klient posiada strumieniowe przesyłanie filmów
+\item \textbf{Contract} (factor; 3 poziomy: Month-to-month/One year/Two year) -  okres obowiązywania umowy z klientem
+\item \textbf{PaperlessBilling} (factor; 2 poziomy: No/Yes) - informacja czy klient posiada fakturowanie bez papieru
+\item \textbf{PaymentMethod} (factor; 4 poziomy: Electronic check/Mailed check/Bank transfer(automatic)/Credit card(automatic)) - metoda płatności klienta
+\item \textbf{MonthlyCharges} (numeric; zakres: 18.25-118.75) - kwota pobierana od klienta miesięcznie
+\item \textbf{TotalCharges} (numeric; zakres: 18.80-8684.80) - całkowita kwota pobrana od klienta
+\item \textbf{Churn} (factor; 2 poziomy: No/Yes) - informacja czy klient odszedł z firmy
+\end{itemize}
+    
+\vspace{0.5cm}    
+
+**Typy poszczególnych cech**
+      
+```{r, podzial_zmiennych, echo=FALSE}
+# Dzielimy zmienne na [jakosciowe] i [ilosciowe] 
+jakosciowe <- which(sapply(dane, is.factor))
+ilosciowe <- which(sapply(dane, is.numeric))
+
+```
+    
+Zmienne ilościowe to:
+\begin{itemize}
+\item \textbf{`r colnames(dane)[ilosciowe]`}.
+\end{itemize}
+    
+Zmienne jakościowe to:
+\begin{itemize}
+\item \textbf{`r colnames(dane)[jakosciowe]`}.
+\end{itemize}    
+
+\vspace{0.5cm}    
+  
+      
+```{r, liczba_poz_customer_ID, echo=FALSE}
+# Sprawdzamy liczbę poziomów dla cechy customerID
+poziomy <- length(levels(customerID))
+
+```
+Liczba poziomów dla cechy \textbf{customerID} wynosi `r poziomy`, zatem zmienna ta pełni rolę identyfikatora klientów, więc ją usuwamy.
+\newpage
+
+    
+```{r, usuniecie_customer_ID, echo=FALSE}
+# usuwamy cechę customerID
+dane <- dane[,-1]
+
+```
+
+```{r, brakujace_dane, echo=FALSE}
+# liczba brakujacych obserwacji 
+a <- colSums(is.na(dane))   
+# połozenie brakujacych obserwacji 
+b <- which(is.na(dane), arr=TRUE)
+    
+```
+
+Informacja na temat braków danych (numery wierszy i nazwy cech) jest podana 
+w Tabeli \ref{tab.na.dane}. Łącznie zaobserwowaliśmy `r sum(is.na(dane))` brakujących danych, które kodowane są za pomocą symbolu \texttt{NA}. Ilość braków w porównaniu z ilością obserwacji jest niska, dlatego usunięcie ich nie spowoduje utraty kluczowych dla analizy informacji. Ponadto usunięte dane dotyczyły nowych klientów, którzy dopiero rozpoczęli staż w firmie i nie posiadali jeszcze żadnych kosztów całkowitych, więc usunięcie ich pozwoliło urzetelnić statystyki dla zmiennych \textbf{TotalCharges} oraz \textbf{tenure}.
+    
+```{r Braki danych, echo=FALSE, results='asis'}
+# położenie brakujacych informacji oraz przyspisane numerom kolumn ich nazw
+tab.na <- which(is.na(dane), arr.ind = TRUE)
+tab.na[,2] <- colnames(dane)[tab.na[,2]]
+
+# przypisanie nazw kolumn i ustawienie braku nazw wierszy dla tabeli tab.na 
+colnames(tab.na) <- c("Wiersz","Cecha")
+rownames(tab.na) <- NULL
+
+# utworzenie tabeli 
+xtab.na <- xtable(tab.na,
+                 caption = "Braki w danych.",
+                 label = "tab.na.dane")
+print(xtab.na,
+      type="latex",
+      table.placement = "H",
+      comment=FALSE,
+      include.rownames=FALSE)
+```
+
+    
+```{r, usuniecie_brakow, echo=FALSE}
+# usuwamy wiersze zawierajace NA
+dane <- na.omit(dane)
+    
+# ponownie dołączamy zmienne
+attach(dane)
+```
+
+\vspace{0.5cm}
+    
+Zmienną \textbf{SeniorCitizen} w celu dalszej analizy zmieniamy na typ factor z dwoma poziomami, które informują, czy klient jest emerytem: "No" - nie, "Yes" - tak.
+
+```{r, echo=FALSE}
+dane$SeniorCitizen <- as.factor(dane$SeniorCitizen) # zmieniamy zmienną SeniorCitizen na jakościową
+levels(dane$SeniorCitizen) <- c("No", "Yes")
+```      
+      
+```{r, nietypowe_wartosci, echo=FALSE, results='asis'}
+# Sprawdzamy wartości przyjmowane przez cechę poleceniem unique
+# przykładowo: unique(MultipleLines).
+    
+# Jeśli lista tych wartości pokrywa się z liczbą poziomów to jest ok
+# poziomy sprawdzamy poleceniem levels
+# przykładowo: levels(MultipleLines).
+    
+# Powtarzamy dla wszystkich cech, by upewnić się czy 
+# nie ma niestandardowego kodowania brakujacych obserwacji
+
+# utworzenie podzbioru danych składającego się tylko ze zmiennych jakosciowych i zastosowanie funkcji unique() oraz levels() dla tego podzbioru
+ind_jakosciowe <- which(sapply(dane, is.factor))
+dane_jakosciowe <- dane[ind_jakosciowe]
+niet_wart <- sapply(dane_jakosciowe, function(x) {list(unique(x), levels(x))})
+
+# utworzenie ramki danych
+niet_wart_ramka <- data.frame(
+  Zmienna = names(dane_jakosciowe),
+  Wartości = sapply(dane_jakosciowe, function(x) paste(sort(as.character(unique(x))), collapse = "; ")),
+  Poziomy = sapply(dane_jakosciowe, function(x) paste(sort(levels(x)), collapse = "; "))
+)
+
+# utworzenie tabeli
+tabelka <- xtable(niet_wart_ramka, 
+                  caption = "Porównanie wartości unikalnych z poziomami dla zmiennych jakościowych",
+                  label="tab_niet_wart",
+                  align = "llp{6cm}p{6cm}")
+
+print(tabelka, table.placement = "H", comment = FALSE, include.rownames = FALSE)
+
+
+# utworzenie podzbioru danych składającego się tylko ze zmiennych ilosciowych i zastosowanie funkcji summary() dla tego podzbioru
+ind_ilosciowe <- which(sapply(dane, is.numeric))
+dane_ilosciowe <- dane[ind_ilosciowe]
+niet_wart_2 <- sapply(dane_ilosciowe, function(x) {summary(x)})
+
+# utworzenie tabeli
+tabelka2 <- xtable(t(niet_wart_2),
+                  caption="Wskaźniki sumaryczne dla zmiennych ilościowych",
+                  label="tab_niet_wart_2")
+
+print(tabelka2, table.placement = "H",comment=FALSE)
+```
+    
+Wniosek: Dla każdej zmiennej jakościowej lista wartości przyjmowana przez daną cechę pokrywa się z liczbą jej poziomów, zatem nie występują żadne niestandardowe kodowania wartości brakujących. Dla zmiennych ilościowych ich wskaźniki sumaryczne również nie wskazują na występowanie jakichś niestandardowych kodowań.
+
+\newpage
+
+    
+# Analiza opisowa - wskaźniki sumaryczne i wykresy
+
+
+**
+Podstawowe wskaźniki sumaryczne (miary położenia i rozproszenia) 
+dla poszczególnych cech/zmiennych.
+**
+      
+Wartości miar położenia, rozproszenia oraz koncentracji i asymetrii dla zmiennej 
+\textbf{MonthlyCharges} można znaleźć w Tabelach \ref{tab:tab1}, \ref{tab:tab2} 
+oraz \ref{tab:tab3}.
+
+    
+```{r, miary_polozenia, echo=FALSE, results='asis'}
+#miary położenia dla MonthlyCharges
+df1 <- t(as.matrix(summary(MonthlyCharges)))
+rownames(df1) <- c("MonthlyCharges")
+tab1 <- xtable(df1,
+               caption=paste0("Miary położenia dla zmiennej ","MonthlyCharges"),
+               label="tab:tab1")
+print(tab1, table.placement = "H",comment=FALSE)
+
+```
+    
+    
+```{r, miary_rozproszenia, echo=FALSE, results='asis'}
+#miary rozproszenia dla MonthlyCharges
+
+df2 <- matrix(c(sd(MonthlyCharges),
+                IQR(MonthlyCharges),
+                max(MonthlyCharges)-min(MonthlyCharges)),
+              nrow=1, ncol=3)
+colnames(df2) <- c("odchylenie standardowe", "rozstęp miedzykwartylowy", "rozstęp")
+rownames(df2) <- c("MonthlyCharges")
+tab2 <- xtable(df2,
+               caption=paste0("Miary rozproszenia dla zmiennej ","MonthlyCharges"),
+               label="tab:tab2")
+print(tab2, table.placement = "H",comment=FALSE)
+```
+    
+    
+```{r, miary_koncentracji_i_asymetrii, echo=FALSE, results='asis'}
+#miary koncentracji i asymetrii dla MonthlyCharges
+    
+df3 <- data.frame(skew = skewness(MonthlyCharges),
+                      curt = kurtosis(MonthlyCharges))
+names(df3) <- c("skośność", "kurtoza")
+rownames(df3) <- c("MonthlyCharges")
+tab3 <- xtable(df3,
+               caption=paste0("Miary koncentracji i asymetrii dla zmiennej ",
+                              "MonthlyCharges"),
+                label="tab:tab3")
+print(tab3, table.placement = "H",comment=FALSE)
+```
+
+Na podstawie wyników z Tabel \ref{tab:tab1}, \ref{tab:tab2}, \ref{tab:tab3} średnia miesięcznych opłat wynosi `r round(df1[4], 2)`, natomiast mediana jest od niej wyższa i wynosi `r round(df1[3], 2)`, co sugeruje występowanie asymetrii lewostronnej. Potwierdza to współczynnik skośności równy `r round(df3[1],2)`. Oznacza to, że większosć klietów wnosi wyższe opłaty niż wynosi wartość średnia. Opłaty są bardzo zróżnicowane, świadczy o tym odchylenie standardowe wynoszące aż `r round(df2[1],2)` oraz szeroki rozstęp równy `r df2[3]`. Połowa klientów płaci kwoty w przedziale od `r round(df1[2],2)` do `r round(df1[5],2)`, czyli rozstęp międzykwartylowy jest szeroki i wynosi `r round(df2[2],2)`. Ujemna kurtoza równa `r round(df3[2],2)` sugeruje, że rozkład jest płaski.
+
+
+
+Wartości miar położenia, rozproszenia oraz koncentracji i asymetrii dla zmiennej 
+\textbf{tenure} można znaleźć w Tabelach \ref{tab:tab4}, \ref{tab:tab5} 
+oraz \ref{tab:tab6}.
+   
+```{r, miary_polozenia3, echo=FALSE, results='asis'}
+#miary położenia dla tenure
+
+df1 <- t(as.matrix(summary(tenure)))
+rownames(df1) <- c("tenure")
+tab1 <- xtable(df1,
+               caption=paste0("Miary położenia dla zmiennej ","tenure"),
+               label="tab:tab4")
+print(tab1, table.placement = "H", comment=FALSE)
+
+```
+    
+    
+```{r, miary_rozproszenia3, echo=FALSE, results='asis'}
+#miary rozproszenia dla tenure
+
+df2 <- matrix(c(sd( tenure),
+                IQR( tenure),
+                max( tenure)-min( tenure)),
+              nrow=1, ncol=3)
+colnames(df2) <- c("odchylenie standardowe", "rozstęp miedzykwartylowy", "rozstęp")
+rownames(df2) <- c("tenure")
+tab2 <- xtable(df2,
+               caption=paste0("Miary rozproszenia dla zmiennej"," tenure"),
+               label="tab:tab5")
+print(tab2, table.placement = "H", comment=FALSE)
+```
+    
+    
+```{r, miary_koncentracji_i_asymetrii3, echo=FALSE, results='asis'}
+#miary koncentracji i asymetrii dla tenure
+df3 <- data.frame(skew = skewness( tenure),
+                      curt = kurtosis( tenure))
+names(df3) <- c("skośność", "kurtoza")
+rownames(df3) <- c(" tenure")
+tab3 <- xtable(df3,
+               caption=paste0("Miary koncentracji i asymetrii dla zmiennej ",
+                              " tenure"),
+                label="tab:tab6")
+print(tab3, table.placement = "H", comment=FALSE)
+```
+
+Na podstawie wyników z Tabel \ref{tab:tab4}, \ref{tab:tab5}, \ref{tab:tab6} średni staż klientów wynosi `r round(df1[4], 2)`, natomiast mediana jest od niej niższa i wynosi `r round(df1[3], 2)`, co sugeruje występowanie asymetrii prawostronnej. Potwierdza to dodatni współczynnik skośności równy `r round(df3[1],2)`. Oznacza to, że większość klientów ma staż krótszy niż średni, a średnią zawyża grupa długoletnich, lojalnych użytkowników. Staż klientów jest bardzo zróżnicowany, o czym świadczy odchylenie standardowe wynoszące `r round(df2[1],2)` oraz szeroki rozstęp całkowity równy `r df2[3]`. Połowa osób posiada staż w przedziale od `r round(df1[2],2)` do `r round(df1[5],2)` miesięcy (rozstęp międzykwartylowy wynosi `r round(df2[2],2)`). Bardzo niska, ujemna wartość kurtozy wynosząca `r round(df3[2],2)` wskazuje na wyraźne spłaszczenie rozkładu.
+
+\vspace{0.5cm}
+
+Wartości miar położenia, rozproszenia oraz koncentracji i asymetrii dla zmiennej 
+\textbf{TotalCharges} można znaleźć w Tabelach \ref{tab:tab7}, \ref{tab:tab8} 
+oraz \ref{tab:tab9}.
+   
+```{r, miary_polozenia4, echo=FALSE, results='asis'}
+#miary polozenia dla TotalCharges
+
+df1 <- t(as.matrix(summary(TotalCharges)))
+rownames(df1) <- c("TotalCharges")
+tab1 <- xtable(df1,
+               caption=paste0("Miary położenia dla zmiennej ","TotalCharges"),
+               label="tab:tab7")
+print(tab1, table.placement = "H", comment=FALSE)
+
+```
+    
+    
+```{r, miary_rozproszenia4, echo=FALSE, results='asis'}
+#miary rozproszenia dla TotalCharges
+
+df2 <- matrix(c(sd( TotalCharges),
+                IQR( TotalCharges),
+                max( TotalCharges)-min( TotalCharges)),
+              nrow=1, ncol=3)
+colnames(df2) <- c("odchylenie standardowe", "rozstęp miedzykwartylowy", "rozstęp")
+rownames(df2) <- c("TotalCharges")
+tab2 <- xtable(df2,
+               caption=paste0("Miary rozproszenia dla zmiennej"," TotalCharges"),
+               label="tab:tab8")
+print(tab2, table.placement = "H", comment=FALSE)
+```
+    
+    
+```{r, miary_koncentracji_i_asymetrii4, echo=FALSE, results='asis'}
+#miary koncentracji i asymetrii dla TotalCharges
+
+df3 <- data.frame(skew = skewness( TotalCharges),
+                      curt = kurtosis( TotalCharges))
+names(df3) <- c("skośność", "kurtoza")
+rownames(df3) <- c(" TotalCharges")
+tab3 <- xtable(df3,
+               caption=paste0("Miary koncentracji i asymetrii dla zmiennej ",
+                              " TotalCharges"),
+                label="tab:tab9")
+print(tab3, table.placement = "H", comment=FALSE)
+
+```
+
+Na podstawie wyników z Tabel \ref{tab:tab7}, \ref{tab:tab8}, \ref{tab:tab9} średnia suma opłat wynosi `r round(df1[4], 2)`, natomiast mediana jest od niej znacznie niższa i wynosi `r round(df1[3], 2)`, co sugeruje występowanie asymetrii prawostronnej. Potwierdza to wysoki współczynnik skośności równy aż `r round(df3[1], 2)`. Oznacza to, że średnią zawyża grupa klientów o bardzo wysokich opłatach. Zmienna jest bardzo zróżnicowana, o czym świadczy szeroki rozstęp wynoszący `r df2[3]` oraz odchylenie standardowe zbliżone do średniej (`r round(df2[1], 2)`). Połowa klientów mieści się w przedziale od `r round(df1[2], 2)` do `r round(df1[5], 2)` (rozstęp międzykwartylowy wynosi `r round(df2[2], 2)`). Wartość kurtozy wynosi `r round(df3[2], 2)` i jest bliska zeru.
+
+\newpage
+
+
+```{r, wykresy_zm_ilosciowe, echo=FALSE, fig.cap="Histogramy dla zmiennych ilościowych", fig.width=12, fig.height=16, out.width="100%", fig.pos = "H"}
+# plot_histogram(dane, nrow=2, ncol=2, title="Histogramy dla zmiennych ilościowych") 
+```
+
+      
+Zaczynamy od wykresów dla zmiennych ilościowych.
+```{r, zmienne_ilosciowe, echo=FALSE, fig.cap="Histogramy i wykresy pudełkowe dla zmiennych tenure, MonthlyCharges, TotalCharges \\label{fig:ilosciowe}", fig.height=6, fig.width=12.75, out.width="100%"}
+
+par(mfrow=c(2,3))
+
+# Histogram tenure
+hist(tenure, main="Histogram dla tenure", 
+     xlab="tenure", col="#848FBE", breaks=20)
+
+# Histogram MonthlyCharges
+hist(MonthlyCharges, main="Histogram dla MonthlyCharges", 
+     xlab="MonthlyCharges", col="#848FBE", breaks=20)
+
+# Histogram TotalCharges
+hist(TotalCharges, main="Histogram dla TotalCharges", 
+     xlab="TotalCharges", col="#848FBE", breaks=20)
+
+# Boxplot tenure
+boxplot(tenure, main="Wykres pudełkowy dla tenure", 
+        ylab="tenure", col="#ABCADF")
+
+# Boxplot MonthlyCharges
+boxplot(MonthlyCharges, main="Wykres pudełkowy dla MonthlyCharges", 
+        ylab="MonthlyCharges", col="#ABCADF")
+
+# Boxplot TotalCharges
+boxplot(TotalCharges, main="Wykres pudełkowy dla TotalCharges", 
+        ylab="TotalCharges", col="#ABCADF")
+
+par(mfrow=c(1,1))
+
+```
+
+Wykresy przedstawione na Rysunku \ref{fig:ilosciowe} wskazują na znaczne zróżnicowanie klientów. Najliczniejszą grupę stanowią klienci o najkrótszym stażu (0-5 miesięcy), co widać na histogramie dla zmiennej \textbf{tenure}. Długi prawy ogon rozkładu potwierdza asymetrię prawostronną. Analogiczne zjawisko, lecz o jeszcze większym nasileniu, obserwujemy dla zmiennej \textbf{TotalCharges}. Zdecydowana większość wartości koncentruje się przy niskich opłatach całkowitych. 
+W przypadku \textbf{MonthlyCharges} przesunięcie wykresu pudełkowego w kierunku wyższych wartości, mediana znajdująca się powyżej środka oraz kształt histogramu potwierdzają występowanie asymetrii lewostronnej, jednak widać bardzo wysoki słupek przy niskich opłatach miesięcznych. Sugeruje to istnienie grupy klientów, która nie korzysta z żadnych drogich dodatkowych usług.
+Warto zwrócić uwagę, że na wykresach pudełkowych dla wszystkich trzech zmiennych nie występują wartości odstające. Oznacza to, że mimo szerokiego rozstępu danych, nie obserwujemy żadnych anomalii.
+
+\newpage
+
+A teraz wykresy oraz tabele liczności dla zmiennych jakościowych.
+
+```{r, wykresy_zm_jakosciowe, echo=FALSE, fig.cap="Wykresy słupkowe dla zmiennych jakościowych", fig.width=12, fig.height=16, out.width="100%", fig.pos = "H"}
+#plot_bar(dane, nrow=6, ncol=3, title = "Wykresy słupkowe dla zmiennych jakościowych")
+
+```
+
+```{r, wybrane_zmienne_jakosciowe, echo=FALSE, fig.cap="Wykresy słupkowe dla zmiennych InternetService, OnlineSecurity, OnlineBackup, TechSupport, Contract, PaymentMethod \\label{fig:jakosciowe}", fig.pos = "H", fig.width=12.75, fig.height=6, out.width="100%"}
+
+par(mfrow=c(2,3))
+
+# InternetService
+barplot(table(InternetService), main="Wykres słupkowy dla InternetService",
+        col=c("#B6417E", "#BB76BF" ,"#B590D2"), ylab="Liczność")
+
+# OnlineSecurity
+barplot(table(OnlineSecurity), main="Wykres słupkowy dla OnlineSecurity",
+        col=c("#B6417E", "#BB76BF" ,"#B590D2"), ylab="Liczność")
+
+# OnlineBackup
+barplot(table(OnlineBackup), main="Wykres słupkowy dla OnlineBackup",
+        col=c("#B6417E", "#BB76BF" ,"#B590D2"), ylab="Liczność")
+
+# TechSupport
+barplot(table(TechSupport), main="Wykres słupkowy dla TechSupport",
+        col=c("#B6417E", "#BB76BF" ,"#B590D2"), ylab="Liczność")
+
+# Contract
+barplot(table(Contract), main="Wykres słupkowy dla Contract",
+        col=c("#B6417E", "#BB76BF" ,"#B590D2"), ylab="Liczność")
+
+# PaymentMethod
+tab_PM <- table(PaymentMethod)
+names(tab_PM) <- gsub("\\(", "\n\\(", names(tab_PM))
+barplot(tab_PM,
+        main = "Wykres słupkowy dla PaymentMethod",
+        col = c("#B6417E", "#BB76BF", "#B590D2", "#AFADE1"),
+        ylab = "Liczność")
+par(mfrow=c(1,1))
+```
+    
+Tabele liczności dla zmiennych jakościowych znajdują się w Tabelach \ref{tab:licz.InternetService}, \ref{tab:licz.OnlineSecurity}, \ref{tab:licz.OnlineBackup}, \ref{tab:licz.TechSupport}, \ref{tab:licz.contract} oraz \ref{tab:licz.PaymentMethod}.
+
+```{r, zmienne_jakosciowe_tabele_licznosci, results='asis', echo=FALSE}
+# gender
+# tab.gender <- table(gender)
+# xtab.gender <- xtable(tab.gender,
+#                         caption = "Tabela liczności dla cechy gender.",
+#                         label = "tab:licz.gender")
+# print(xtab.gender, table.placement = "H", comment=FALSE)
+
+# Partner
+# tab.Partner <- table(Partner)
+# xtab.Partner <- xtable(tab.Partner,
+#                         caption = "Tabela liczności dla cechy Partner.",
+#                         label = "tab:licz.Partner")
+# print(xtab.Partner, table.placement = "H", comment=FALSE)
+
+# Dependents
+# tab.Dependents <- table(Dependents)
+# xtab.Dependents <- xtable(tab.Dependents,
+#                         caption = "Tabela liczności dla cechy Dependents",
+#                         label = "tab:licz.Dependents")
+# print(xtab.Dependents, table.placement = "H", comment=FALSE)
+
+# PhoneService
+# tab.PhoneService <- table(PhoneService)
+# xtab.PhoneService <- xtable(tab.PhoneService,
+#                         caption = "Tabela liczności dla cechy PhoneService",
+#                         label = "tab:licz.PhoneService")
+# print(xtab.PhoneService, table.placement = "H", comment=FALSE)
+
+# MultipleLines
+# tab.MultipleLines <- table(MultipleLines)
+# xtab.MultipleLines <- xtable(tab.MultipleLines,
+#                         caption = "Tabela liczności dla cechy MultipleLines",
+#                         label = "tab:licz.MultipleLines")
+# print(xtab.MultipleLines, table.placement = "H", comment=FALSE)
+
+#InternetService
+tab.InternetService <- table(InternetService)
+xtab.InternetService <- xtable(tab.InternetService,
+                        caption = "Tabela liczności dla cechy InternetService",
+                        label = "tab:licz.InternetService")
+print(xtab.InternetService, table.placement = "H", comment=FALSE)
+
+# OnlineSecurity
+tab.OnlineSecurity <- table(OnlineSecurity)
+xtab.OnlineSecurity <- xtable(tab.OnlineSecurity,
+                        caption = "Tabela liczności dla cechy OnlineSecurity",
+                        label = "tab:licz.OnlineSecurity")
+print(xtab.OnlineSecurity, table.placement = "H", comment=FALSE)
+
+# OnlineBackup
+tab.OnlineBackup <- table(OnlineBackup)
+xtab.OnlineBackup <- xtable(tab.OnlineBackup,
+                        caption = "Tabela liczności dla cechy OnlineBackup",
+                        label = "tab:licz.OnlineBackup")
+print(xtab.OnlineBackup, table.placement = "H", comment=FALSE)
+
+# DeviceProtection
+# tab.DeviceProtection <- table(DeviceProtection)
+# xtab.DeviceProtection <- xtable(tab.DeviceProtection,
+#                         caption = "Tabela liczności dla cechy DeviceProtection",
+#                         label = "tab:licz.DeviceProtection")
+# print(xtab.DeviceProtection, table.placement = "H", comment=FALSE)
+
+# TechSupport
+tab.TechSupport <- table(TechSupport)
+xtab.TechSupport <- xtable(tab.TechSupport,
+                        caption = "Tabela liczności dla cechy TechSupport",
+                        label = "tab:licz.TechSupport")
+print(xtab.TechSupport, table.placement = "H", comment=FALSE)
+
+# StreamingTV
+# tab.StreamingTV <- table(StreamingTV)
+# xtab.StreamingTV <- xtable(tab.StreamingTV,
+#                         caption = "Tabela liczności dla cechy StreamingTV",
+#                         label = "tab:licz.StreamingTV")
+# print(xtab.StreamingTV, table.placement = "H", comment=FALSE)
+
+# StreamingMovies
+# tab.StreamingMovies <- table(StreamingMovies)
+# xtab.StreamingMovies <- xtable(tab.StreamingMovies,
+#                         caption = "Tabela liczności dla cechy StreamingMovies",
+#                         label = "tab:licz.StreamingMovies")
+# print(xtab.StreamingMovies, table.placement = "H", comment=FALSE)
+
+# Contract
+tab.contract <- table(Contract)
+xtab.contract <- xtable(tab.contract,
+                        caption = "Tabela liczności dla cechy Contract",
+                        label = "tab:licz.contract")
+print(xtab.contract, table.placement = "H", comment=FALSE)
+
+# PaperlessBilling
+# tab.PaperlessBilling <- table(PaperlessBilling)
+# xtab.PaperlessBilling <- xtable(tab.PaperlessBilling,
+#                         caption = "Tabela liczności dla cechy PaperlessBilling",
+#                         label = "tab:licz.PaperlessBilling")
+# print(xtab.PaperlessBilling, table.placement = "H", comment=FALSE)
+
+# PaymentMethod
+tab.PaymentMethod <- table(PaymentMethod)
+xtab.PaymentMethod <- xtable(tab.PaymentMethod,
+                        caption = "Tabela liczności dla cechy PaymentMethod",
+                        label = "tab:licz.PaymentMethod")
+print(xtab.PaymentMethod, table.placement = "H", comment=FALSE)
+
+# Churn
+# tab.Churn <- table(Churn)
+# xtab.Churn <- xtable(tab.Churn,
+#                         caption = "Tabela liczności dla cechy Churn",
+#                         label = "tab:licz.Churn")
+# print(xtab.Churn, table.placement = "H", comment=FALSE)
+
+# SeniorCitizen
+# tab.SeniorCitizen <- table(SeniorCitizen)
+# xtab.SeniorCitizen <- xtable(tab.SeniorCitizen,
+#                         caption = "Tabela liczności dla cechy SeniorCitizen",
+#                         label = "tab:licz.SeniorCitizen")
+# print(xtab.SeniorCitizen, table.placement = "H", comment=FALSE)
+```
+
+Na podstawie wykresów słupkowych przedstawionych na Rysunku \ref{fig:jakosciowe} oraz Tabel liczności (\ref{tab:licz.InternetService}, \ref{tab:licz.OnlineSecurity}, \ref{tab:licz.OnlineBackup}, \ref{tab:licz.TechSupport}, \ref{tab:licz.contract} oraz \ref{tab:licz.PaymentMethod}) możemy zauważyć, że najliczniejsza grupa klientów korzysta z internetu światłowodowego (`r tab.InternetService["Fiber optic"]` osób) i jest to najpopularniejsza usługa oferowana przez firmę. Jedynie około `r tab.InternetService["No"]`, co stanowi `r round(100*(tab.InternetService["No"]/sum(tab.InternetService)),2)`% klientów, w ogóle nie posiada usługi internetowej. W przypadku zmiennych takich jak \textbf{OnlineSecurity}, \textbf{OnlineBackup} czy \textbf{TechSupport}, dominuje wartość "No", co oznacza, że klienci rzadko decydują się na korzystanie z usług dodatkowych. Największa grupa klientów wybiera umowy krótkoterminowe typu \textbf{Month-to-month} (`r tab.contract["Month-to-month"]` osób), a kontrakty długoterminowe (roczne i dwuletnie) stanowią mniejszość (łącznie `r tab.contract["One year"]+tab.contract["Two year"]`). Najpopularniejszą metodą płatności jest \textbf{Electronic check} (`r tab.PaymentMethod["Electronic check"]` osób), natomiast pozostałe metody (\textbf{Bank transfer}, \textbf{Credit card} oraz \textbf{Mailed check}) są wybierane rzadziej (`r tab.PaymentMethod["Bank transfer (automatic)"]`, `r tab.PaymentMethod["Credit card (automatic)"]` oraz `r tab.PaymentMethod["Mailed check"]`).
+  
+\newpage  
+  
+**
+Wykorzystując wykresy rozrzutu dla par zmiennych ciągłych, sprawdzimy czy występują istotne (np. liniowe) zależności pomiędzy zmiennymi.
+**
+
+```{r, wspolczynnik_korelacji, results='asis', echo=FALSE}
+# macierz/tabela współczynnikow korelacji zmiennych ilościowych
+
+macierz.kor <- cor(cbind(tenure, 
+                         MonthlyCharges, TotalCharges))
+xtab.kor <- xtable(macierz.kor, caption = "Współczynniki korelacji
+                   zmiennych ilościowych", label = "tab:mac.kor")
+print(xtab.kor, table.placement = "H", comment=FALSE)
+
+#plot_correlation(dane, type="continuous", 
+#                 title="Macierz korelacji dla zmiennych ciągłych")
+```
+
+```{r, wykresy_rozrzutu, results='asis', echo=FALSE, fig.cap="Wykresy rozrzutu dla zmiennych ilościowych \\label{fig:rozrzut}"}
+#wykres rozrzutu dla zmiennych ilościowych 
+
+pairs(cbind(tenure, MonthlyCharges, TotalCharges),
+      main = "Wykresy rozrzutu dla zmiennych ilościowych",
+      pch = 19, cex = 0.5, col = rgb(0, 0, 0, 0.1))
+
+```
+
+\newpage
+
+Na podstawie danych z Tabeli \ref{tab:mac.kor} współczynnik korelacji pomiędzy zmienną \textbf{tenure} a \textbf{TotalCharges} wynosi aż `r round(macierz.kor["tenure","TotalCharges"],2)`, co oznacza silną zależność liniową. Wraz ze stażem klienta rośnie łączna suma dokonanych przez niego wpłat. Istotną zależność widzimy również pomiędzy \textbf{MonthlyCharges} a \textbf{TotalCharges} (wspołczynnik korelacji równy `r round(macierz.kor["MonthlyCharges","TotalCharges"],2)`). Zjawisko to wydaje się być oczekiwane, im wyższe opłaty miesięczne, tym większa suma łącznie wszystkich wpłat. Między \textbf{tenure} a \textbf{MonthlyCharges} korelacja jest niska i wynosi `r round(macierz.kor["tenure","MonthlyCharges"],2)`, co wskazuje na brak wyraźnej liniowej zależności między stażem klienta a jego miesięcznymi opłatami. Opisane zależności można zaobserwować na rysunku \ref{fig:rozrzut}.
+
+
+\vspace{0.5cm}
+
+
+* Zmienna **MonthlyCharges** przyjmuje wartości w zakresie od `r sprintf("%.2f", min(MonthlyCharges))` do `r sprintf("%.2f",max(MonthlyCharges))` USD.\newline
+Szeroki rozstęp równy `r sprintf("%.2f", max(MonthlyCharges)-min(MonthlyCharges))` USD świadczy o dużym zróżnicowaniu cenowym oferty firmy.
+
+* Zmienna **tenure** przyjmuje wartości w zakresie od `r round(min(tenure),2)` do `r round(max(tenure),2)` miesięcy.\newline
+Staż klientów jest zróżnicowany, mamy klientów nowych oraz bardzo lojalnych, których staż sięga aż `r round(max(tenure),2)` miesięcy.
+
+* Zmienna **TotalCharges** przyjmuje wartości w zakresie od `r sprintf("%.2f",min(TotalCharges))` do `r sprintf("%.2f",max(TotalCharges))` USD.\newline
+Duży rozstęp równy `r sprintf("%.2f",max(TotalCharges)-min(TotalCharges))` USD wynika z różnic w stażu klientów oraz zależności pomiędzy stażem a lącznymi wniesionymi opłatami.
+      
+    
+**i. Czy wszystkie zmienne mają rozkład symetryczny?**\newline 
+Żadna ze zmiennych nie ma rozkładu symetrycznego. Zmienne \textbf{tenure} oraz \textbf{TotalCharges} charakteryzują się asymetrią prawostronną, zaś \textbf{MonthlyCharges} lewostronną.\newline 
+  
+**ii. Które cechy charakteryzują się największą zmiennością?**\newline 
+
+Podstawowe wskaźniki sumaryczne oraz wartości współczynnika zmienności dla danych zmiennych przestawiono w Tabeli \ref{tab:zmiennosc}.
+
+```{r, wyniki, results='asis', echo=FALSE}
+
+# miary zmienności dla zmiennych ilościowych
+
+srednia <- sapply(data.frame(tenure, MonthlyCharges, TotalCharges), mean, na.rm=TRUE)
+odch_standardowe <- sapply(data.frame(tenure, MonthlyCharges, TotalCharges), sd, na.rm=TRUE)
+wariancja <- sapply(data.frame(tenure, MonthlyCharges, TotalCharges), var, na.rm=TRUE)
+cv <- (odch_standardowe/srednia) * 100 #obliczamy współczynnik zmienności
+
+
+wyniki <- data.frame(
+  Srednia = srednia,
+  Odchylenie = odch_standardowe,
+  Wariancja = wariancja,
+  Współczynnik.zmienności = cv)
+colnames(wyniki) <- c("Średnia", "Odchylenie standardowe", "Wariancja", "Współczynnik zmienności")
+print(xtable(wyniki, caption="Miary zmienności zmiennych ilościowych", label = "tab:zmiennosc"), comment=FALSE, table.placement="H")
+```
+
+Na podstawie wyników z Tabeli \ref{tab:zmiennosc} widzimy, że największą zmiennością charakteryzuje się cecha **TotalCharges**, której współczynnik zmienności wynosi aż `r round(wyniki["TotalCharges","Współczynnik zmienności"],2)`%. Wysoka zmienność występuje także dla cechy **tenure** i jest ona równa `r round(wyniki["tenure","Współczynnik zmienności"],2)`%, a najmniejsza, lecz również istotna, dla **MonthlyCharges** wynosząca `r round(wyniki["MonthlyCharges","Współczynnik zmienności"],2)`%.
+
+\vspace{0.5cm}
+
+     
+Zdecydowana większość klientów korzysta z usługi \textbf{PhoneService}. Zmienna \textbf{InternetService} najczęściej przyjmuje kategorię \textbf{Fiber optic}, następnie \textbf{DSL}, a najmniejsza liczba klientów wcale nie korzysta z usług internetowych. Większość klientów nie korzysta z usług dodatkowych, takich jak \textbf{OnlineSecurity} i \textbf{TechSupport}. Najczęściej wybieranym typem umowy jest \textbf{Month-to-month}, a umowy długoterminowe (roczne i dwuletnie) są znacznie mniej popularne. Najpopularniejszą metodą płatności jest \textbf{Electronic check}, natomiast pozostałe metody są wybierane rzadziej.
+
+\vspace{1cm}      
+
+    
+# Analiza opisowa z podziałem na grupy
+      
+
+**
+Przeprowadzamy analizę opisową, tym razem jednak z podziałem na dwie grupy:\newline
+grupa 1: Churn==’Yes’ – grupa klientów, którzy odeszli (zrezygnowali), \newline
+grupa 2: Churn==’No’ – grupa lojalnych klientów (korzystają dalej z usług firmy).
+**
+
+Wyznaczmy na początku podstawowe wskaźniki sumaryczne dla poszczególnych zmiennych numerycznych.
+
+Wartości miar położenia, rozproszenia oraz koncentracji i asymetrii dla zmiennej 
+\textbf{MonthlyCharges} z podziałem na lojalnych i tych, którzy zakończyli współpracę, można znaleźć w Tabelach \ref{tab_MC_3}, \ref{tab_MC_3_rozp} 
+oraz \ref{tab_MC_3_konc}.
+
+```{r, miary_polozenia_etap_3_1, echo=FALSE, results='asis'}
+# podzial na lojalnych i nielojalnych przy pomocy zmiennej Churn
+dane.lojalni <- dane[Churn=="No",]
+dane.odeszli <- dane[Churn=="Yes",]
+
+# procent klientow ktorzy odeszli wzgledem ogolu
+proc_klient_odesz <- round(nrow(dane.odeszli)/nrow(dane)*100, 2)
+
+# podzial na lojalnych i nielojalnych dla zmiennej MonthlyCharges
+MonthlyCharges.lojalni <- dane.lojalni[,"MonthlyCharges"]
+MonthlyCharges.odeszli <- dane.odeszli[,"MonthlyCharges"]
+
+# wskazniki sumaryczne dla podzialu
+wspol_sum_lojal <- summary(MonthlyCharges.lojalni)
+wspol_sum_odesz <- summary(MonthlyCharges.odeszli)
+
+# tworzenie tabeli
+razem <- rbind(wspol_sum_lojal, wspol_sum_odesz)
+rownames(razem) <- c("MonthlyCharges - lojalni", "MonthlyCharges - odeszli")
+tab_MC <- xtable(razem,
+               caption=paste0("Miary położenia dla zmiennej MonthlyCharges z podziałem na klientów którzy pozostali i     odeszli."),
+               label="tab_MC_3")
+
+print(tab_MC, table.placement = "H",comment=FALSE)
+```
+     
+```{r, miary_rozproszenia_etap_3_1, echo=FALSE, results='asis'}
+# macierz z miarami rozproszenia dla MonthlyCharges - lojalni
+MC_lojal_rozp <- matrix(c(sd(MonthlyCharges.lojalni),
+                IQR(MonthlyCharges.lojalni),
+                max(MonthlyCharges.lojalni)-min(MonthlyCharges.lojalni)),
+              nrow=1, ncol=3)
+
+# macierz z miarami rozproszenia dla MonthlyCharges - odeszli
+MC_odesz_rozp <- matrix(c(sd(MonthlyCharges.odeszli),
+                IQR(MonthlyCharges.odeszli),
+                max(MonthlyCharges.odeszli)-min(MonthlyCharges.odeszli)),
+              nrow=1, ncol=3)
+
+# tworzenie tabeli
+razem_2 <- rbind(MC_lojal_rozp, MC_odesz_rozp)
+colnames(razem_2) <- c("odchylenie standardowe", "rozstęp międzykwartylowy", "rozstęp")
+rownames(razem_2) <- c("MonthlyCharges - lojalni", "MonthlyCharges - odeszli")
+tab_MC_rozp <- xtable(razem_2,
+               caption=paste0("Miary rozproszenia dla zmiennej MonthlyCharges z podziałem na klientów którzy pozostali i     odeszli."),
+               label="tab_MC_3_rozp")
+
+print(tab_MC_rozp, table.placement = "H",comment=FALSE)
+```
+
+```{r, miary_koncentracji_i_asymetrii_etap_3_1, echo=FALSE, results='asis'}
+# macierz z miarami koncentracji i asymetrii dla MonthlyCharges - lojalni
+MC_lojal_konc <- matrix(c(skewness(MonthlyCharges.lojalni), kurtosis(MonthlyCharges.lojalni)), nrow=1, ncol=2) 
+
+# macierz z miarami koncentracji i asymetrii dla MonthlyCharges - odeszli
+MC_odesz_konc <- matrix(c(skewness(MonthlyCharges.odeszli), kurtosis(MonthlyCharges.odeszli)), nrow=1, ncol=2) 
+
+# tworzenie tabeli
+razem_3 <- rbind(MC_lojal_konc, MC_odesz_konc)
+colnames(razem_3) <- c("skośność", "kurtoza")
+rownames(razem_3) <- c("MonthlyCharges - lojalni", "MonthlyCharges - odeszli")
+tab_MC_konc <- xtable(razem_3,
+               caption=paste0("Miary koncentracji i asymetrii dla zmiennej MonthlyCharges z podziałem na klientów którzy pozostali i odeszli."),
+                label="tab_MC_3_konc")
+
+print(tab_MC_konc, table.placement = "H",comment=FALSE)
+```
+
+Średnie miesięczne koszty dla lojalnych klientów wynoszą `r round(wspol_sum_lojal["Mean"], 2)`, natomiast dla tych co odeszli wynoszą `r round(wspol_sum_odesz["Mean"], 2)`. Mediana jest w obu przypadkach wyższa od średniej i wynosi kolejno `r round(wspol_sum_lojal["Median"], 2)` oraz `r round(wspol_sum_odesz["Median"], 2)`, co sugeruje asymetrię lewostronną. Współczynnik skośności dla stałych klientów, wynoszący `r round(MC_lojal_konc[1,1], 2)`, jest bliski zeru, a więc można powiedzieć, że mamy w tym przypadku do czynienia z rozkładem niemal symetrycznym. W przypadku klientów, którzy odeszli, współczynnik skośności jest już wyraźniejszy i wynosi `r round(MC_odesz_konc[1,1], 2)`, co sugeruje, że mamy do czynienia z rozkładem umiarkowanie skośnym.
+Rozstęp jest szeroki i wynosi `r round(MC_lojal_rozp[1,3], 2)` w przypadku klientów lojalnych i `r round(MC_odesz_rozp[1,3], 2)` w przypadku tych, którzy zrezygnowali z usług. Jednak duża różnica występuje dla rozstępu międzykwartylowego (`r round(MC_lojal_rozp[1,2], 2)` i `r round(MC_odesz_rozp[1,2], 2)`), który świadczy o tym, że w grupie klientów nielojalnych opłaty są bardziej zbliżone do siebie (oscylują wokół wyższych wartości, na co wskazuje średnia i mediana w ich grupie). Tak samo odchylenie standardowe jest stosunkowo duże (`r round(MC_lojal_rozp[1,1], 2)` oraz `r round(MC_odesz_rozp[1,1], 2)`), co w połączeniu z rozstępem oznacza duże zróżnicowanie miesięcznych opłat zarówno dla lojalnych jak i nielojalnych, jednak w przypadku nielojalnych, to zróżnicowanie jest znacznie mniejsze (co potwierdza kurtoza).
+
+\vspace{0.5cm}
+
+<!-- Wartości miar położenia, rozproszenia oraz koncentracji i asymetrii dla zmiennej -->
+<!-- \textbf{SeniorCitizen} z podziałem na lojalnych i tych, którzy zakończyli współpracę, można znaleźć w Tabelach \ref{tab_SC_3}, \ref{tab_SC_3_rozp} -->
+<!-- oraz \ref{tab_SC_3_konc}. -->
+
+<!-- ```{r, miary_polozenia_etap_3_2, echo=FALSE, results='asis'} -->
+<!-- SeniorCitizen.lojalni <- dane.lojalni[,"SeniorCitizen"] -->
+<!-- SeniorCitizen.odeszli <- dane.odeszli[,"SeniorCitizen"] -->
+
+<!-- wspol_sum_lojal_2 <- summary(SeniorCitizen.lojalni) -->
+<!-- wspol_sum_odesz_2 <- summary(SeniorCitizen.odeszli) -->
+
+<!-- razem_4 <- rbind(wspol_sum_lojal_2, wspol_sum_odesz_2) -->
+<!-- rownames(razem_4) <- c("SeniorCitizen - lojalni", "SeniorCitizen - odeszli") -->
+<!-- tab_SC <- xtable(razem_4, -->
+<!--                caption=paste0("Miary położenia dla zmiennej SeniorCitizen z podziałem na klientów którzy pozostali i     odeszli."), -->
+<!--                label="tab_SC_3") -->
+<!-- print(tab_SC, table.placement = "H",comment=FALSE) -->
+<!-- ``` -->
+
+<!-- ```{r, miary_rozproszenia_etap_3_2, echo=FALSE, results='asis'} -->
+<!-- SC_lojal_rozp <- matrix(c(sd(SeniorCitizen.lojalni), -->
+<!--                 IQR(SeniorCitizen.lojalni), -->
+<!--                 max(SeniorCitizen.lojalni)-min(SeniorCitizen.lojalni)), -->
+<!--               nrow=1, ncol=3) -->
+<!-- SC_odesz_rozp <- matrix(c(sd(SeniorCitizen.odeszli), -->
+<!--                 IQR(SeniorCitizen.odeszli), -->
+<!--                 max(SeniorCitizen.odeszli)-min(SeniorCitizen.odeszli)), -->
+<!--               nrow=1, ncol=3) -->
+<!-- razem_5 <- rbind(SC_lojal_rozp, SC_odesz_rozp) -->
+
+<!-- colnames(razem_5) <- c("odchylenie standardowe", "rozstęp międzykwartylowy", "rozstęp") -->
+<!-- rownames(razem_5) <- c("SeniorCitizen - lojalni", "SeniorCitizen - odeszli") -->
+<!-- tab_SC_rozp <- xtable(razem_5, -->
+<!--                caption=paste0("Miary rozproszenia dla zmiennej SeniorCitizen z podziałem na klientów którzy pozostali i     odeszli."), -->
+<!--                label="tab_SC_3_rozp") -->
+<!-- print(tab_SC_rozp, table.placement = "H",comment=FALSE) -->
+<!-- ``` -->
+
+<!-- ```{r, miary_koncentracji_i_asymetrii_etap_3_2, echo=FALSE, results='asis'} -->
+<!-- SC_lojal_konc <- matrix(c(skewness(SeniorCitizen.lojalni), kurtosis(SeniorCitizen.lojalni)), nrow=1, ncol=2) -->
+<!-- SC_odesz_konc <- matrix(c(skewness(SeniorCitizen.odeszli), kurtosis(SeniorCitizen.odeszli)), nrow=1, ncol=2) -->
+<!-- razem_6 <- rbind(SC_lojal_konc, SC_odesz_konc) -->
+
+<!-- colnames(razem_6) <- c("skośność", "kurtoza") -->
+<!-- rownames(razem_6) <- c("SeniorCitizen - lojalni", "SeniorCitizen - odeszli") -->
+<!-- tab_SC_konc <- xtable(razem_6, -->
+<!--                caption=paste0("Miary koncentracji i asymetrii dla zmiennej SeniorCitizen z podziałem na klientów którzy pozostali i odeszli."), -->
+<!--                 label="tab_SC_3_konc") -->
+<!-- print(tab_SC_konc, table.placement = "H",comment=FALSE) -->
+<!-- ``` -->
+
+Wartości miar położenia, rozproszenia oraz koncentracji i asymetrii dla zmiennej 
+\textbf{tenure} z podziałem na lojalnych i tych, którzy zakończyli współpracę, można znaleźć w Tabelach \ref{tab_t_3}, \ref{tab_t_3_rozp} 
+oraz \ref{tab_t_3_konc}.
+
+```{r, miary_polozenia_etap_3_3, echo=FALSE, results='asis'}
+# podzial na lojalnych i nielojalnych dla zmiennej tenure
+tenure.lojalni <- dane.lojalni[,"tenure"]
+tenure.odeszli <- dane.odeszli[,"tenure"]
+
+# obliczenie wskaznikow sumarycznych
+wspol_sum_lojal_3 <- summary(tenure.lojalni)
+wspol_sum_odesz_3 <- summary(tenure.odeszli)
+
+# tworzenie tabeli
+razem_7 <- rbind(wspol_sum_lojal_3, wspol_sum_odesz_3)
+rownames(razem_7) <- c("tenure - lojalni", "tenure - odeszli")
+tab_t <- xtable(razem_7,
+               caption=paste0("Miary położenia dla zmiennej tenure z podziałem na klientów którzy pozostali i     odeszli."),
+               label="tab_t_3")
+
+print(tab_t, table.placement = "H",comment=FALSE)
+```
+     
+```{r, miary_rozproszenia_etap_3_3, echo=FALSE, results='asis'}
+# macierz z miarami rozproszenia dla tenure - lojalni
+t_lojal_rozp <- matrix(c(sd(tenure.lojalni),
+                IQR(tenure.lojalni),
+                max(tenure.lojalni)-min(tenure.lojalni)),
+              nrow=1, ncol=3)
+
+# macierz z miarami rozproszenia dla tenure - odeszli
+t_odesz_rozp <- matrix(c(sd(tenure.odeszli),
+                IQR(tenure.odeszli),
+                max(tenure.odeszli)-min(tenure.odeszli)),
+              nrow=1, ncol=3)
+
+# tworzenie tabeli
+razem_8 <- rbind(t_lojal_rozp, t_odesz_rozp)
+colnames(razem_8) <- c("odchylenie standardowe", "rozstęp międzykwartylowy", "rozstęp")
+rownames(razem_8) <- c("tenure - lojalni", "tenure - odeszli")
+tab_t_rozp <- xtable(razem_8,
+               caption=paste0("Miary rozproszenia dla zmiennej tenure z podziałem na klientów którzy pozostali i     odeszli."),
+               label="tab_t_3_rozp")
+
+print(tab_t_rozp, table.placement = "H",comment=FALSE)
+```
+
+```{r, miary_koncentracji_i_asymetrii_etap_3_3, echo=FALSE, results='asis'}
+# macierz z miarami koncentracji i asymetrii dla tenure - lojalni
+t_lojal_konc <- matrix(c(skewness(tenure.lojalni), kurtosis(tenure.lojalni)), nrow=1, ncol=2)   
+
+# macierz z miarami koncentracji i asymetrii dla tenure - odeszli
+t_odesz_konc <- matrix(c(skewness(tenure.odeszli), kurtosis(tenure.odeszli)), nrow=1, ncol=2) 
+
+# tworzenie tabeli
+razem_9 <- rbind(t_lojal_konc, t_odesz_konc)
+colnames(razem_9) <- c("skośność", "kurtoza")
+rownames(razem_9) <- c("tenure - lojalni", "tenure - odeszli")
+tab_t_konc <- xtable(razem_9,
+               caption=paste0("Miary koncentracji i asymetrii dla zmiennej tenure z podziałem na klientów którzy pozostali i odeszli."),
+                label="tab_t_3_konc")
+
+print(tab_t_konc, table.placement = "H",comment=FALSE)
+```
+
+Średnia ilość miesięcy dla lojalnych klientów wynosi `r round(wspol_sum_lojal_3["Mean"], 2)`, natomiast dla tych co odeszli wynosi `r round(wspol_sum_odesz_3["Mean"], 2)`. Mediana wynosi kolejno `r round(wspol_sum_lojal_3["Median"], 2)` oraz `r round(wspol_sum_odesz_3["Median"], 2)`, co sugeruje rozkład niemal symetryczny dla lojalnych i asymetrię prawostronną dla nielojalnych. Współczynnik skośności dla stałych klientów, wynoszący `r round(t_lojal_konc[1,1], 2)`, jest bliski zeru, a więc możemy potwierdzić nasze wcześniejsze przypuszczenia na temat typu rozkładu dla tej grupy. W przypadku klientów, którzy odeszli, współczynnik skośności jest znacznie wyraźniejszy i wynosi `r round(t_odesz_konc[1,1], 2)`, co sugeruje, że mamy do czynienia z rozkładem silnie skośnym.
+Rozstęp jest szeroki i wynosi `r round(t_lojal_rozp[1,3], 2)` w obu przypadkach. Jednak spora różnica występuje dla rozstępu międzykwartylowego (`r round(t_lojal_rozp[1,2], 2)` i `r round(t_odesz_rozp[1,2], 2)`), który świadczy o tym, że w grupie klientów nielojalnych ilość miesięcy przez które klient pozostał w firmie jest bardziej zbliżona do siebie (oscyluje wokół niższych wartości, na co również wskazuje średnia i mediana). Tak samo odchylenie standardowe jest stosunkowo duże (`r round(t_lojal_rozp[1,1], 2)` oraz `r round(t_odesz_rozp[1,1], 2)`), co w połączeniu z rozstępem oznacza duże zróżnicowanie ilości miesięcy spędzonych w firmie zarówno dla lojalnych jak i nielojalnych, jednak w przypadku nielojalnych, to zróżnicowanie jest znacznie mniejsze, a ich wartości stażu są znacznie silniej skoncentrowane, o czym świadczy kurtoza wynosząca `r round(t_odesz_konc[1,2], 2)`. Dla lojalnych kurtoza równa `r round(t_lojal_konc[1,2], 2)` mówi o tym, że ich rozkład jest spłaszczony (klienci nie skupiają się wokół jednej, konkretnej długości stażu).
+
+\vspace{0.5cm}
+
+Wartości miar położenia, rozproszenia oraz koncentracji i asymetrii dla zmiennej 
+\textbf{TotalCharges} z podziałem na lojalnych i tych, którzy zakończyli współpracę, można znaleźć w Tabelach \ref{tab_TC_3}, \ref{tab_TC_3_rozp} 
+oraz \ref{tab_TC_3_konc}.
+
+```{r, miary_polozenia_etap_3_4, echo=FALSE, results='asis'}
+# podzial na lojalnych i nielojalnych dla zmiennej TotalCharges
+TotalCharges.lojalni <- dane.lojalni[,"TotalCharges"]
+TotalCharges.odeszli <- dane.odeszli[,"TotalCharges"]
+
+# wskazniki sumaryczne
+wspol_sum_lojal_4 <- summary(TotalCharges.lojalni)
+wspol_sum_odesz_4 <- summary(TotalCharges.odeszli)
+
+# tworzenie tabeli
+razem_10 <- rbind(wspol_sum_lojal_4, wspol_sum_odesz_4)
+rownames(razem_10) <- c("TotalCharges - lojalni", "TotalCharges - odeszli")
+tab_TC <- xtable(razem_10,
+               caption=paste0("Miary położenia dla zmiennej TotalCharges z podziałem na klientów którzy pozostali i     odeszli."),
+               label="tab_TC_3")
+
+print(tab_TC, table.placement = "H",comment=FALSE)
+```
+     
+```{r, miary_rozproszenia_etap_3_4, echo=FALSE, results='asis'}
+# macierz z miarami rozproszenia dla TotalCharges - lojalni
+TC_lojal_rozp <- matrix(c(sd(TotalCharges.lojalni),
+                IQR(TotalCharges.lojalni),
+                max(TotalCharges.lojalni)-min(TotalCharges.lojalni)),
+              nrow=1, ncol=3)
+
+# macierz z miarami rozproszenia dla TotalCharges - odeszli
+TC_odesz_rozp <- matrix(c(sd(TotalCharges.odeszli),
+                IQR(TotalCharges.odeszli),
+                max(TotalCharges.odeszli)-min(TotalCharges.odeszli)),
+              nrow=1, ncol=3)
+
+# tworzenie tabeli
+razem_11 <- rbind(TC_lojal_rozp, TC_odesz_rozp)
+colnames(razem_11) <- c("odchylenie standardowe", "rozstęp międzykwartylowy", "rozstęp")
+rownames(razem_11) <- c("TotalCharges - lojalni", "TotalCharges - odeszli")
+tab_TC_rozp <- xtable(razem_11,
+               caption=paste0("Miary rozproszenia dla zmiennej TotalCharges z podziałem na klientów którzy pozostali i     odeszli."),
+               label="tab_TC_3_rozp")
+
+print(tab_TC_rozp, table.placement = "H",comment=FALSE)
+```
+
+```{r, miary_koncentracji_i_asymetrii_etap_3_4, echo=FALSE, results='asis'}
+# macierz z miarami koncentracji i asymetrii dla TotalCharges - lojalni
+TC_lojal_konc <- matrix(c(skewness(TotalCharges.lojalni), kurtosis(TotalCharges.lojalni)), nrow=1, ncol=2)
+
+# macierz z miarami koncentracji i asymetrii dla TotalCharges - odeszli
+TC_odesz_konc <- matrix(c(skewness(TotalCharges.odeszli), kurtosis(TotalCharges.odeszli)), nrow=1, ncol=2)
+
+# tworzenie tabeli
+razem_12 <- rbind(TC_lojal_konc, TC_odesz_konc)
+colnames(razem_12) <- c("skośność", "kurtoza")
+rownames(razem_12) <- c("TotalCharges - lojalni", "TotalCharges - odeszli")
+tab_TC_konc <- xtable(razem_12,
+               caption=paste0("Miary koncentracji i asymetrii dla zmiennej TotalCharges z podziałem na klientów którzy pozostali i odeszli."),
+                label="tab_TC_3_konc")
+
+print(tab_TC_konc, table.placement = "H",comment=FALSE)
+```
+
+Średnie całkowite koszty dla lojalnych klientów wynoszą `r round(wspol_sum_lojal_4["Mean"], 2)`, natomiast dla tych co odeszli wynoszą średnio `r round(wspol_sum_odesz_4["Mean"], 2)`. Mediana jest w obu przypadkach niższa od średniej i wynosi kolejno `r round(wspol_sum_lojal_4["Median"], 2)` oraz `r round(wspol_sum_odesz_4["Median"], 2)`, co sugeruje znaczną asymetrię prawostronną. Współczynnik skośności dla stałych klientów wynosi `r round(TC_lojal_konc[1,1], 2)`, więc mamy do czynienia z rozkładem umiarkowanie skośnym. W przypadku klientów, którzy odeszli, współczynnik skośności jest bardziej wyraźny i wynosi `r round(TC_odesz_konc[1,1], 2)`, co sugeruje, że mamy do czynienia z rozkładem silnie skośnym.
+Rozstęp jest szeroki i podobny dla obu grup (wynoszący około `r floor(TC_odesz_rozp[1,3]/10)*10`). Jednak dosyć duża różnica występuje dla rozstępu międzykwartylowego (`r round(TC_lojal_rozp[1,2], 2)` i `r round(TC_odesz_rozp[1,2], 2)`), który świadczy o tym, że w grupie klientów nielojalnych całkowite opłaty są bardziej zbliżone do siebie (oscylują wokół niższych wartości, co potwierdza średnia i mediana w ich grupie oraz dodatnia kurtoza). Tak samo odchylenie standardowe jest stosunkowo duże (`r round(TC_lojal_rozp[1,1], 2)` oraz `r round(TC_odesz_rozp[1,1], 2)`), co w połączeniu z rozstępem oznacza duże zróżnicowanie opłat zarówno dla lojalnych jak i nielojalnych, jednak w przypadku nielojalnych, to zróżnicowanie jest znacznie mniejsze.
+
+\newpage
+
+Zajmijmy się teraz zilustrowaniem rozkładów poszczególnych cech za pomocą odpowiednich wykresów. Zacznijmy od wykresów dla zmiennych ilościowych.
+
+```{r ,rozklady_zm_ilosciowe_podzial, echo=FALSE, fig.cap="Histogramy, wykresy pudełkowe oraz estymatory jądrowe gęstości dla zmiennych tenure, MonthlyCharges, TotalCharges z podziałem na klientów lojalnych i tych którzy odeszli. \\label{fig:rozk_il_podz}", fig.height=13, fig.width=11, out.width="100%"}
+
+par(mfrow=c(4,3))
+
+# histogram dla tenure - lojalni
+hist(tenure.lojalni, main="Histogram dla tenure - lojalni", 
+     xlab="tenure - lojalni", col="lightpink", breaks=20)
+
+# histogram dla MonthlyCharges - lojalni
+hist(MonthlyCharges.lojalni, main="Histogram dla MonthlyCharges - lojalni", xlab="MonthlyCharges - lojalni", col="lightpink", breaks=20)
+
+# histogram dla TotalCharges - lojalni
+hist(TotalCharges.lojalni, main="Histogram dla TotalCharges - lojalni", xlab="TotalCharges - lojalni", col="lightpink", breaks=20)
+
+# histogram dla tenure - odeszli
+hist(tenure.odeszli, main="Histogram dla tenure - odeszli", 
+     xlab="tenure - odeszli", col="palevioletred2", breaks=20)
+
+# histogram dla MonthlyCharges - odeszli
+hist(MonthlyCharges.odeszli, main="Histogram dla MonthlyCharges - odeszli", xlab="MonthlyCharges - odeszli", col="palevioletred2", breaks=20)
+
+# histogram dla TotalCharges - odeszli
+hist(TotalCharges.odeszli, main="Histogram dla TotalCharges - odeszli", xlab="TotalCharges - odeszli", col="palevioletred2", breaks=20)
+
+# wykres pudelkowy dla tenure z podzialem na lojalnych i nielojalnych
+boxplot(tenure~Churn, main="Wykres pudełkowy dla tenure - podział \n na tych co zostali i tych co odeszli", 
+        ylab="tenure", col=c("thistle2", "orchid"))
+
+# wykres pudelkowy dla MonthlyCharges z podzialem na lojalnych i nielojalnych
+boxplot(MonthlyCharges~Churn, main="Wykres pudełkowy dla MonthlyCharges - podział \n na tych co zostali i tych co odeszli", 
+        ylab="MonthlyCharges", col=c("thistle2", "orchid"))
+
+# wykres pudelkowy dla TotalCharges z podzialem na lojalnych i nielojalnych
+boxplot(TotalCharges~Churn, main="Wykres pudełkowy dla TotalCharges - podział \nna tych co zostali i tych co odeszli", 
+        ylab="TotalCharges", col=c("thistle2", "orchid"))
+
+# wykres gęstosci empirycznej dla tenure z podzialem na lojalnych i nielojalnych
+d_t_lojal <- density(tenure.lojalni)
+d_t_odesz <- density(tenure.odeszli)
+max_t_y <- max(d_t_lojal$y, d_t_odesz$y)
+plot(d_t_lojal, col="royalblue", lwd=2, main="Porównanie gęstości empirycznych dla tenure", ylim=c(0, max_t_y*1.1))
+lines(d_t_odesz, col="darkviolet", lwd=2)
+legend(x = "topright", legend=c('Odeszli','Lojalni'), fill=c("darkviolet","royalblue"))
+
+# wykres gęstosci empirycznej dla MonthlyCharges z podzialem na lojalnych i nielojalnych
+d_MC_lojal <- density(MonthlyCharges.lojalni)
+d_MC_odesz <- density(MonthlyCharges.odeszli)
+max_MC_y <- max(d_MC_lojal$y, d_MC_odesz$y)
+plot(d_MC_lojal, col="royalblue", lwd=2, main="Porównanie gęstości empirycznych dla \nMonthlyCharges", ylim=c(0, max_MC_y*1.1))
+lines(d_MC_odesz, col="darkviolet", lwd=2)
+legend(x = "topright", legend=c('Odeszli','Lojalni'), fill=c("darkviolet","royalblue"))
+
+# wykres gęstosci empirycznej dla TotalCharges z podzialem na lojalnych i nielojalnych
+d_TC_lojal <- density(TotalCharges.lojalni)
+d_TC_odesz <- density(TotalCharges.odeszli)
+max_TC_y <- max(d_TC_lojal$y, d_TC_odesz$y)
+plot(d_TC_lojal, col="royalblue", lwd=2, main="Porównanie gęstości empirycznych dla TotalCharges", ylim=c(0, max_TC_y*1.1))
+lines(d_TC_odesz, col="darkviolet", lwd=2)
+legend(x = "topright", legend=c('Odeszli','Lojalni'), fill=c("darkviolet","royalblue"))
+
+par(mfrow=c(1,1))
+```
+
+Wykresy dla zmiennych ilościowych przedstawione na Rysunku \ref{fig:rozk_il_podz} potwierdzają nasze wczesniejsze przypuszczenia nt. rozkładów poszczególnych grup. Dla zmiennej \textbf{tenure} wykres gęstości oraz histogram dla klientów lojalnych, wykazują rozkład niemal symetryczny z lekkimi pikami na końcach. Potwierdzają one otrzymaną w Tabeli \ref{tab_t_3_konc} ujemną kurtozę (`r round(t_lojal_konc[1,2], 2)`) – dane nie koncentrują się wokół średniej. Histogram jak i wykres gęstości empirycznej dla klientów, którzy odeszli wyraźnie opada w prawo, co potwierdza silną asymetrię prawostronną (skośność `r round(t_odesz_konc[1,1], 2)`), zatem możemy wywnioskować, że większość osób rezygnuje na bardzo wczesnym etapie. Wykres pudełkowy uwydatnia znaczącą różnicę w medianach. Klienci lojalni mają znacznie wyższy "środek ciężkości" stażu niż ci, którzy odeszli. Przyjrzyjmy się teraz zmiennej \textbf{MonthlyCharges}. Wykresy gęstości i histogramy ujawniają cechę, której nie widać w tabelach – rozkład jest bimodalny. Mamy dużą grupę klientów z niskimi opłatami (ok. 20-25 USD) oraz drugą grupę z wysokimi (ok. 70-100 USD). U klientów, którzy odeszli, wykres gęstości jest wyraźniej przesunięty w stronę wyższych wartości. Potwierdza to wyższą średnią (`r round(wspol_sum_odesz["Mean"], 2)`) w porównaniu do lojalnych (`r round(wspol_sum_lojal["Mean"], 2)`) (dane z Tabeli \ref{tab_MC_3}). Zajmijmy się teraz zmienną \textbf{TotalCharges}. Wszystkie wykresy dla tej zmiennej zarówno dla lojalnych, jak i tych, co odeszli, wykazują silną asymetrię prawostronną. Długie "ogony" ciągnące się w stronę wysokich wartości potwierdzają dodatnią skośność (`r round(TC_lojal_konc[1,1], 2)` i `r round(TC_odesz_konc[1,1], 2)`). Na wykresie pudełkowym dla grupy nielojalnych widać liczne punkty powyżej górnego wąsa. Są to klienci, którzy pomimo krótkiego stażu (co wiemy z analizy tenure) wygenerowali bardzo wysokie koszty całkowite przed odejściem. Wykres gęstości dla tej samej grupy jest znacznie "smuklejszy" i wyższy przy niskich wartościach, co koresponduje z dodatnią kurtozą (`r round(TC_odesz_konc[1,2], 2)`) – oznacza to większą koncentrację wydatków w niższych przedziałach kwotowych w tej grupie.
+
+\newpage
+
+Przejdźmy teraz do wykresów dla zmiennych jakościowych.
+
+```{r, wykresy_zm_jakosciowe_podzial, echo=FALSE, fig.cap="Wykresy słupkowe dla zmiennych jakościowych z podziałem na klientów lojalnych i tych którzy odeszli.", fig.width=12, fig.height=16, out.width="100%", fig.pos = "H"}
+# wykresy słupkowe dla lojalnych
+# plot_bar(dane.lojalni, nrow=6, ncol=3, title = "Wykresy słupkowe dla zmiennych jakościowych - klienci lojalni")
+
+# wykresy słupkowe dla tych co odeszli
+# plot_bar(dane.odeszli, nrow=6, ncol=3, title = "Wykresy słupkowe dla zmiennych jakościowych -  klienci którzy odeszli")
+```
+
+```{r, wybrane_zmienne_jakosciowe_podzial, echo=FALSE, fig.cap="Wykresy słupkowe dla zmiennych Contract, InternetService, PaymentMethod, OnlineSecurity, TechSupport, OnlineBackup \\label{fig:jakosciowe_podz}", fig.pos = "H", fig.width=12.75, fig.height=12, out.width="100%"}
+kolorki <- colorRampPalette(c("cadetblue1", "palegreen"))
+kolorki2 <- colorRampPalette(c("mediumaquamarine","darkmagenta"))
+
+par(mfrow=c(4,3))
+# wykres słupkowy dla Contract - lojalni
+Contract.lojalni <- dane.lojalni[,"Contract"]
+barplot(table(Contract.lojalni), main="Wykres słupkowy dla Contract - lojalni",
+        col=kolorki2(3), ylab="Liczność")
+
+# wykres słupkowy dla InternetService - lojalni
+InternetService.lojalni <- dane.lojalni[,"InternetService"]
+barplot(table(InternetService.lojalni), main="Wykres słupkowy dla InternetService - lojalni",
+        col=kolorki2(3), ylab="Liczność")
+
+# wykres słupkowy dla PaymentMethod - lojalni
+PaymentMethod.lojalni <- dane.lojalni[,"PaymentMethod"]
+tab_PM_1 <- table(PaymentMethod.lojalni)
+names(tab_PM_1) <- gsub("\\(", "\n\\(", names(tab_PM_1))
+
+barplot(tab_PM_1, main="Wykres słupkowy dla PaymentMethod - lojalni",
+        col=kolorki2(4), ylab="Liczność")
+
+# wykres słupkowy dla Contract - odeszli
+Contract.odeszli <- dane.odeszli[,"Contract"]
+barplot(table(Contract.odeszli), main="Wykres słupkowy dla Contract - odeszli",
+        col=kolorki2(3), ylab="Liczność")
+
+# wykres słupkowy dla InternetService - odeszli
+InternetService.odeszli <- dane.odeszli[,"InternetService"]
+barplot(table(InternetService.odeszli), main="Wykres słupkowy dla InternetService - odeszli",
+        col=kolorki2(3), ylab="Liczność")
+
+# wykres słupkowy dla PaymentMethod - odeszli
+PaymentMethod.odeszli <- dane.odeszli[,"PaymentMethod"]
+tab_PM_2 <- table(PaymentMethod.odeszli)
+names(tab_PM_2) <- gsub("\\(", "\n\\(", names(tab_PM_2))
+
+barplot(tab_PM_2, main="Wykres słupkowy dla PaymentMethod - odeszli",
+        col=kolorki2(4), ylab="Liczność")
+
+# wykres słupkowy dla OnlineSecurity - lojalni
+OnlineSecurity.lojalni <- dane.lojalni[,"OnlineSecurity"]
+barplot(table(OnlineSecurity.lojalni), main="Wykres słupkowy dla OnlineSecurity - lojalni",
+        col=kolorki(3), ylab="Liczność")
+
+# wykres słupkowy dla TechSupport - lojalni
+TechSupport.lojalni <- dane.lojalni[,"TechSupport"]
+barplot(table(TechSupport.lojalni), main="Wykres słupkowy dla TechSupport - lojalni",
+        col=kolorki(3), ylab="Liczność")
+
+# wykres słupkowy dla OnlineBackup - lojalni
+OnlineBackup.lojalni <- dane.lojalni[,"OnlineBackup"]
+barplot(table(OnlineBackup.lojalni), main="Wykres słupkowy dla OnlineBackup - lojalni",
+        col=kolorki(3), ylab="Liczność")
+
+# wykres słupkowy dla OnlineSecurity - odeszli
+OnlineSecurity.odeszli <- dane.odeszli[,"OnlineSecurity"]
+barplot(table(OnlineSecurity.odeszli), main="Wykres słupkowy dla OnlineSecurity - odeszli",
+        col=kolorki(3), ylab="Liczność")
+
+# wykres słupkowy dla TechSupport - odeszli
+TechSupport.odeszli <- dane.odeszli[,"TechSupport"]
+barplot(table(TechSupport.odeszli), main="Wykres słupkowy dla TechSupport - odeszli",
+        col=kolorki(3), ylab="Liczność")
+
+# wykres słupkowy dla OnlineBackup - odeszli
+OnlineBackup.odeszli <- dane.odeszli[,"OnlineBackup"]
+barplot(table(OnlineBackup.odeszli), main="Wykres słupkowy dla OnlineBackup - odeszli",
+        col=kolorki(3), ylab="Liczność")
+
+par(mfrow=c(1,1))
+```
+
+Przeanalizujmy wykresy dla zmiennych jakościowych znajdujące się na Rysunku \ref{fig:jakosciowe_podz}. Przyjrzyjmy się najpierw zmiennej \textbf{Contract}. Jest to definitywnie zmienna o najsilniejszym znaczeniu wizualnym. Wśród osób, które odeszły, dominują klienci z umową Month-to-month. Liczba rezygnacji przy umowach rocznych i dwuletnich jest marginalna. Sugeruje to, że brak długoterminowego zobowiązania jest głównym czynnikiem ułatwiającym decyzję o odejściu. Przejdźmy do zmiennej \textbf{InternetService}. Największy odsetek rezygnacji obserwujemy u użytkowników światłowodu. U klientów lojalnych rozkład między DSL a światłowodem jest bardziej wyrównany. Może to wskazywać na niezadowolenie z ceny lub jakości światłowodu w tej grupie. Analizując zmienną \textbf{PaymentMethod}, zauważyć można, że klienci, którzy odeszli, najczęściej korzystali z czeków elektronicznych. Pozostałe metody nie były tak częstym powodem odejść jak właśnie czeki elektroniczne. U lojalnych klientów rozkład metod płatności jest niemal równomierny. Rozpatrzmy teraz zmienne \textbf{OnlineSecurity}, \textbf{TechSupport} oraz \textbf{OnlineBackup}. We wszystkich trzech przypadkach u klientów, którzy odeszli, dominuje kategoria "No" (brak usługi). Klienci posiadający wsparcie techniczne lub dodatkowe zabezpieczenia odchodzą znacznie rzadziej. Z tych danych możemy zatem wywnioskować, że posiadanie usług dodatkowych silnie koreluje z lojalnością klienta – prawdopodobnie budują one większą wartość relacyjną i utrudniają rezygnację.
+
+\vspace{0.5cm}
+
+  
+Zmiennymi, które charakteryzują się największym zróżnicowaniem rozkładu w grupach, są:
+
+\begin{itemize}
+\item\textbf{tenure, MonthlyCharges, Contract, InternetService, PaymentMethod, OnlineSecurity, TechSupport, OnlineBackup, DeviceProtection, StreamingMovies, StreamingTV}.
+\end{itemize}
+ 
+\vspace{1cm}  
+  
+#  Podsumowanie - wnioski z przeprowadzonej analizy
+
+
+Na podstawie przeprowadzonych analiz możemy wyciągnąć kilka kluczowych wniosków. Większość klientów firmy korzysta z umów krótkoterminowych typu \textbf{Month-to-month}, co również potwierdza czas stażu klientów - większość z nich to osoby ze stażem w zakresie 0-5 miesięcy. Istnieje silna korelacja między długością stażu a całkowitymi wniesionymi opłatami, jednak nie zaobserwowano związku pomiędzy stażem (\textbf{tenure}) a wysokością miesięcznych opłat (\textbf{MonthlyCharges}). Najpopularniejszą usługą oferowaną przez firmę jest światłowód (\textbf{Fiber optic}), natomiast klienci rzadko decydują się na korzystanie z usług dodatkowych. Najczęściej wybieraną metodą płatności jest czek elektroniczny (\textbf{Electronic check}).
+  
+\vspace{0.5cm}  
+  
+Większość klientów wybiera krótkie umowy miesięczne typu \textbf{Month-to-month}, jednak jest to typ umowy, który nie sprzyja lojalności klientów - odchodzą oni zdecydowanie częściej, niż ci korzystający z długoterminowych umów. 
+Najczęściej wybieranymi usługami są usługi telefoniczne oraz internetowe (\textbf{Fiber optic}, \textbf{DSL}). Najpopularniejszą usługą oferowaną przez firmę jest internet światłowodowy \textbf{Fiber optic}, jednocześnie jest to jednak usługa, której użytkownicy najczęściej rezygnują z usług firmy.
+Usługi dodatkowe, takie jak ochrona online, wsparcie techniczne i backup (\textbf{OnlineSecurity}, \textbf{TechSupport}, \textbf{OnlineBackup}) są zdecydowanie mniej popularne. 
+Klienci są bardzo zróżnicowani pod względem łącznych wniesionych opłat (\textbf{TotalCharges}), co wynika głównie ze znacznych różnic w stażu (\textbf{tenure}).
+
+\vspace{0.5cm}
+
+\newpage
+
+**
+- Jaka jest główna przyczyna odchodzenia klientów?\newline
+Innymi słowy, czym charakteryzują się klienci rezygnujący z usług firmy?\newline
+- Co firma powinna zrobić, aby przeciwdziałać odchodzeniu klientów?
+**
+
+Około `r proc_klient_odesz`% ogółu badanych to osoby, które nie zdecydowały się przedłużyć umowy z firmą. W grupie tej dominują klienci korzystający z krótkoterminowych umów typu \textbf{Month-to-month}, podczas gdy posiadacze zobowiązań długoterminowych (rocznych i dwuletnich) odchodzą znacznie rzadziej. Ponadto, nie korzystają oni zazwyczaj z ochrony online, wsparcia technicznego czy też backupu (\textbf{OnlineSecurity}, \textbf{TechSupport}, \textbf{OnlineBackup}). Klienci, którzy odchodzą najczęściej, charakteryzują się także tym, że korzystają z płatności czekiem elektronicznym (\textbf{Electronic check}) oraz ze światłowodu (usługa \textbf{Fiber optic}).
+
+Aby zwiększyć lojalność klientów, firma powinna zachęcać do wybierania umów długoterminowych, na przykład poprzez dodanie interesujących bonusów lojalnościowych. Ponadto, warto promować korzystanie z usług dodatkowych, takich jak ochrona online, wsparcie techniczne i backup. Firma powinna również przyjrzeć się jakości usług światłowodowych i metody płatności czekiem elektronicznym. 
+  
+  
