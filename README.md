@@ -13,6 +13,7 @@ The project was completed as part of a university course. The report was written
 ## Dataset
 
 The project uses the **Telco Customer Churn Dataset**, which contains information about customers of a telecommunications company.
+
 Data source:  
 [Kaggle - Telco Customer Churn Dataset](https://www.kaggle.com/datasets/blastchar/telco-customer-churn)
 
